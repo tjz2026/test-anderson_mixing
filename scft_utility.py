@@ -18,6 +18,39 @@ from numpy.fft import fftn,ifftn
 #from scipy.fftpack import fftn, ifftn
 from scipy.integrate import simps
 
+# define parameters.
+# SCFT  parameters 
+XN=20.0  # Flory-huggins parameters for AB diblock copolymer
+fA=0.24   # Volume fraction of A block
+# unit cell parameters
+Nx,Ny,Nz=32,32,32 # grid number on each dimension.
+Lx,Ly,Lz=4.63,4.63,4.63 # unit cell length on each dimension, scaled by Rg
+dx=Lx/Nx
+dy=Ly/Ny
+dz=Lz/Nz
+# chain discretization
+Ns=100
+ds=1.0/Ns
+NA=int(Ns*fA)
+NB=Ns-NA
+
+Andsn_nim=5
+wA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+wB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+dwA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+dwB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+
+class Andsn_fields(object):
+    ''' containing the preceding fields for anderson mixing"
+
+    '''
+    def __init__(self,Andsn_nim,Nx):
+        self.wA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+        self.wB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+        self.dwA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+        self.dwB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+
+
 def simpson_int_pbc(f,Rx_grid):
     Nx=f.shape[0]
     f_x=np.zeros(Nx)
@@ -118,7 +151,8 @@ def field_update(update_scheme,XN,fA,wA,wB,Phi_A,Phi_B,Rx_grid,Nx,ITR): # update
         SimpleMixing_AB(wA_tmp,wA,wB_tmp,wB,lambda_t,field_err)
         if ITR%10==0: print "field_err, iteration step",field_err,ITR 
     elif update_scheme==1 :
-        AndersonMixing_AB()
+        AndersonMixing_AB(wA,wB,wA_tmp,wB_tmp,lambda_t,ITR,field_err)
+        if ITR%10==0: print "field_err, iteration step",field_err,ITR 
     else :
         raise ValueError('Unkonwn update scheme for fields, only simple mxing (0) or Anderson mixing (1) supported now')
 
@@ -133,7 +167,98 @@ def SimpleMixing_AB(wA_tmp,wA,wB_tmp,wB,lambda_t,field_err):
 
 
 
-def AndersonMixing_AB():
+def AndersonMixing_AB(wA,wB,wA_tmp,wB_tmp,lambda_t,ITR,field_err):
+    Num_SimpleMixing=10 # the first 20 steps are simple mixing
+    #Andsn_nim=5         # the number of reserved previous fields for anderson mixing
+    global Andsn_nim
+    print "Andsn_nim=",Andsn_nim
+    global wA_save,wB_save
+    global dwA_save,dwB_save
+    Nx=wA.shape[0]
+    w1A=np.zeros((Nx,Nx,Nx))
+    w1B=np.zeros((Nx,Nx,Nx))
+    w2A=np.zeros((Nx,Nx,Nx))
+    w2B=np.zeros((Nx,Nx,Nx))
+    wA_itr=np.zeros((Nx,Nx,Nx))
+    wB_itr=np.zeros((Nx,Nx,Nx))
+    dwA_itr=np.zeros((Nx,Nx,Nx))
+    dwB_itr=np.zeros((Nx,Nx,Nx))
+    if ITR > Num_SimpleMixing :
+        Andsn_nim_tmp=np.min((ITR-Num_SimpleMixing,Andsn_nim))
+        U_mn=np.zeros((Andsn_nim_tmp,Andsn_nim_tmp))
+        V_m=np.zeros(Andsn_nim_tmp)
+    else:
+        Andsn_nim_tmp=0 
+
+    if ITR <Num_SimpleMixing:
+        SimpleMixing_AB(wA_tmp,wA,wB_tmp,wB,lambda_t,field_err)
+    elif ITR==Num_SimpleMixing:
+        wA_save[0,:,:,:]=wA_tmp[:,:,:]       
+        wB_save[0,:,:,:]=wB_tmp[:,:,:]       
+	dwA_save[0,:,:,:]=wA_save[0,:,:,:]-wA[:,:,:]       
+        dwB_save[0,:,:,:]=wB_save[0,:,:,:]-wB[:,:,:]       
+        SimpleMixing_AB(wA_tmp,wA,wB_tmp,wB,lambda_t,field_err)
+    else :
+        k_andsn=(ITR-Num_SimpleMixing)%(Andsn_nim+1)
+        wA_save[k_andsn,:,:,:]=wA_tmp[:,:,:] 
+	dwA_save[k_andsn,:,:,:]=wA_save[k_andsn,:,:,:]-wA[:,:,:]       
+        wB_save[k_andsn,:,:,:]=wB_tmp[:,:,:] 
+	dwB_save[k_andsn,:,:,:]=wB_save[k_andsn,:,:,:]-wB[:,:,:]       
+        field_err[0]=np.vdot(dwA_save[k_andsn,:,:,:],dwA_save[k_andsn,:,:,:])  
+        field_err[0]=field_err[0]/np.vdot(wA_save[k_andsn,:,:,:],wA_save[k_andsn,:,:,:])  
+        field_err[1]=np.vdot(dwB_save[k_andsn,:,:,:],dwB_save[k_andsn,:,:,:])  
+        field_err[1]=field_err[1]/np.vdot(wB_save[k_andsn,:,:,:],wB_save[k_andsn,:,:,:])  
+        field_err[:]=np.sqrt(field_err)
+        for m_andsn in np.arange(1,Andsn_nim_tmp+1): # 1~andsn_nim_tmp for m
+            k_m=(k_andsn-m_andsn)%(Andsn_nim+1)
+            w1A[:,:,:]=dwA_save[k_andsn,:,:,:]-dwA_save[k_m,:,:,:]
+            w1B[:,:,:]=dwB_save[k_andsn,:,:,:]-dwB_save[k_m,:,:,:]
+            for n_andsn in np.arange(m_andsn,Andsn_nim_tmp+1): # m_andsn~Andsn_nim_tmp for n
+                k_n=(k_andsn-n_andsn)%(Andsn_nim+1)
+                w2A[:,:,:]=dwA_save[k_andsn,:,:,:]-dwA_save[k_n,:,:,:]
+                w2B[:,:,:]=dwB_save[k_andsn,:,:,:]-dwB_save[k_n,:,:,:]
+# Old fortran convention, indx started from 1, here simply used the old code.
+                U_mn[m_andsn-1,n_andsn-1]=np.vdot(w1A,w2A)+np.vdot(w1B,w2B)                      
+         # symmetric matrix, adding the other half.
+        for m_andsn in np.arange(1,Andsn_nim_tmp+1): # 1~andsn_nim_tmp for m
+            for n_andsn in np.arange(1,m_andsn): # 1~m_andsn-1 for n
+                U_mn[m_andsn-1,n_andsn-1]=U_mn[n_andsn-1,m_andsn-1]
+
+        w1A[:,:,:]=dwA_save[k_andsn,:,:,:]
+        w1B[:,:,:]=dwB_save[k_andsn,:,:,:]
+        for m_andsn in np.arange(1,Andsn_nim_tmp+1): # 1~andsn_nim_tmp for m
+            k_m=(k_andsn-m_andsn)%(Andsn_nim+1)
+            w2A[:,:,:]=dwA_save[k_andsn,:,:,:]-dwA_save[k_m,:,:,:]
+            w2B[:,:,:]=dwB_save[k_andsn,:,:,:]-dwB_save[k_m,:,:,:]
+            V_m[m_andsn-1]=np.vdot(w2A,w1A)+np.vdot(w2B,w1B) 
+         # solve the Ux=V linear equations
+        V_m = np.linalg.solve(U_mn, V_m)
+        for m_andsn in np.arange(1,Andsn_nim_tmp+1): # 1~andsn_nim_tmp for m
+            k_m=(k_andsn-m_andsn)%(Andsn_nim+1)
+            wA_itr[:,:,:]=wA_itr[:,:,:]+V_m[m_andsn-1]*(wA_save[k_m,:,:,:]-wA_save[k_andsn,:,:,:]) 
+            dwA_itr[:,:,:]=dwA_itr[:,:,:]+V_m[m_andsn-1]*(dwA_save[k_m,:,:,:]- \
+                           dwA_save[k_andsn,:,:,:]) 
+            wB_itr[:,:,:]=wB_itr[:,:,:]+V_m[m_andsn-1]*(wB_save[k_m,:,:,:]-wB_save[k_andsn,:,:,:]) 
+            dwB_itr[:,:,:]=dwB_itr[:,:,:]+V_m[m_andsn-1]*(dwB_save[k_m,:,:,:]- \
+                           dwB_save[k_andsn,:,:,:]) 
+        wA_itr[:,:,:]=wA_itr[:,:,:]+wA_save[k_andsn,:,:,:]
+        dwA_itr[:,:,:]=dwA_itr[:,:,:]+dwA_save[k_andsn,:,:,:]
+        wB_itr[:,:,:]=wB_itr[:,:,:]+wB_save[k_andsn,:,:,:]
+        dwB_itr[:,:,:]=dwB_itr[:,:,:]+dwB_save[k_andsn,:,:,:]
+# the final mixing of old and new field
+        wA[:,:,:]=wA_itr[:,:,:]+lambda_t*dwA_itr[:,:,:]
+        wB[:,:,:]=wB_itr[:,:,:]+lambda_t*dwB_itr[:,:,:]
 
     return
 
+
+def scft_output(F_tot,F_fh,Phi_A,Phi_B):
+    print "total free energy per unit volume is",F_tot
+    print "Flory-huggins free energy per unit volume is",F_fh
+    Nx=Phi_A.shape[0]
+    slice_yz=np.zeros((Nx,Nx))
+    slice_yz[:,:]=Phi_A[0,:,:]
+    pl.imshow(slice_yz)
+    pl.show()
+
+    return

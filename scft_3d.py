@@ -19,21 +19,23 @@ import scipy.ndimage as ndimage
 from scipy.fftpack import fft, ifft
 from scft_utility import *
 
-# define parameters.
-# SCFT  parameters 
-XN=20.0  # Flory-huggins parameters for AB diblock copolymer
-fA=0.24   # Volume fraction of A block
-# unit cell parameters
-Nx,Ny,Nz=32,32,32 # grid number on each dimension.
-Lx,Ly,Lz=4.63,4.63,4.63 # unit cell length on each dimension, scaled by Rg
-dx=Lx/Nx
-dy=Ly/Ny
-dz=Lz/Nz
-# chain discretization
-Ns=100
-ds=1.0/Ns
-NA=int(Ns*fA)
-NB=Ns-NA
+## define parameters.
+## SCFT  parameters 
+#XN=20.0  # Flory-huggins parameters for AB diblock copolymer
+#fA=0.24   # Volume fraction of A block
+## unit cell parameters
+#Nx,Ny,Nz=32,32,32 # grid number on each dimension.
+#Lx,Ly,Lz=4.63,4.63,4.63 # unit cell length on each dimension, scaled by Rg
+#dx=Lx/Nx
+#dy=Ly/Ny
+#dz=Lz/Nz
+## chain discretization
+#Ns=100
+#ds=1.0/Ns
+#NA=int(Ns*fA)
+#NB=Ns-NA
+
+# init SCFT simulation
 # create grid in both real space and K space,assuming Nx==Ny==Nz
 Rx_grid=np.arange(Nx,dtype=float)*dx
 d_kx=2*np.pi/Lx
@@ -71,7 +73,16 @@ for x in np.arange(Nx):
 
 # starting to run  SCFT loop.
 Max_ITR=1000 # maximu SCFT iteration steps
-update_scheme=0 # 0 for simple mixing, 1 for anderson mixing
+# If using anderson mixing, we need to store the preceding Andsn_nim steps chemcial fields
+Andsn_nim=5 # how many preceding steps of fields are used
+update_scheme=1 # 0 for simple mixing, 1 for anderson mixing
+#if update_scheme==1 : 
+    #Andsn_fields Andsn_AB
+    #wA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+    #wB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+    #dwA_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+    #dwB_save=np.zeros((Andsn_nim+1,Nx,Nx,Nx))
+
 field_err=np.zeros(2)
 error_tol=1.0e-4 # error tolerrence of fields
 for ITR in np.arange(Max_ITR):
@@ -81,7 +92,7 @@ for ITR in np.arange(Max_ITR):
     if np.sum(np.abs(field_err))< error_tol:
         print "SCFT converged with iter_error=",np.sum(np.abs(field_err))
         break  
-scft_output()    # output SCFT simulation info
+scft_output(F_tot,F_fh,Phi_A,Phi_B)    # output SCFT simulation info
 
 
 
