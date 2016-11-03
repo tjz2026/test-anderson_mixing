@@ -62,12 +62,15 @@ for x in np.arange(Nx):
 
 # starting to run  SCFT loop.
 Max_ITR=1000 # maximu SCFT iteration steps
+update_scheme=0 # 0 for simple mixing, 1 for anderson mixing
+field_err=np.zeros(2)
+error_tol=1.0e-4 # error tolerrence of fields
 for ITR in np.arange(Max_ITR):
     AB_diblock_mde_solver(q_f,q_b,wA,wB,fA,Nx,NA,ds) # modified diffusion equation solver for AB diblock copolymer (pesudo spetrum method)
     propagator_to_density(q_f,q_b,fA,NA,NB) # compute the density field from propagators
-    field_update(0)  # update field with simple mixing (0) or anderson mixing (1)
-    if iter_error()< error_tol:
-        print "SCFT converged with iter_error=",iter_error
+    field_err=field_update(update_scheme,XN,fA,wA,wB,Phi_A,Phi_B,Rx_grid,Nx,ITR)  # update field with simple mixing (0) or anderson mixing (1)
+    if np.sum(np.abs(field_err))< error_tol:
+        print "SCFT converged with iter_error=",np.sum(np.abs(field_err))
         break  
 scft_output()    # output SCFT simulation info
 
@@ -117,7 +120,58 @@ def AB_diblock_mde_solver(q_f,q_b,wA,wB,fA,Nx,NA,ds):
 
     return
 
-def propagator_to_density(q_f,q_b,fA,NA,NB): # compute the density field from propagators
+def propagator_to_density(q_f,q_b,Phi_A,Phi_B,bigQ,F_fh,F_tot,fA,Ns,NA,Nx,Lx): # compute the density field from propagators
+    Mv=Lx**3 # Volume of unit cell
+    ar=np.zeros(Nx,Nx,Nx)) # temporary 3d array 
+    ar[:,:,:]=qf[Ns-1,:,:,:]
+    bigQ=simpson_int_pbc(ar,Rx_grid)/Mv # simpson integral of a periodic unit cell
+    Rs=np.zeros(Ns)
+    sum_blk=0.0
+    for x in np.arange(Nx) :
+        for y in np.arange(Nx) :  
+            for z in np.arange(Nx) :
+                ar[x,y,z]=0.0
+                Rs[0:NA]=q_f[0:NA,x,y,z]*q_b[0:NA,x,y,z] # summation of 0~NA-1 segments
+                Phi_A[x,y,z]=simps(Rs[0:NA],dx=ds)
+                Rs[NA:Ns]=q_f[NA:Ns,x,y,z]*q_b[NA:Ns,x,y,z] # summation of NA~Ns-1 segments
+                Phi_B[x,y,z]=simps(Rs[NA:Ns-1],dx=ds)
+                ar[x,y,z]=ar[x,y,z]+Phi_A[x,y,z]+Phi_B[x,y,z]
+   
+    totden=simposon_int_pbc(ar,Rx_grid)/Mv
+    Phi_A[:,:,:]=Phi_A[:,:,:]/totden  
+    Phi_B[:,:,:]=Phi_B[:,:,:]/totden  
+    ar[:,:,:]=XN*Phi_A[:,:,:]*Phi_B[:,:,:]
+    ar[:,:,:]=ar[:,:,:]-wA[:,:,:]*Phi_A[:,:,:]-wB[:,:,:]*Phi_B[:,:,:]
+    ar[:,:,:]=ar[:,:,:]+0.5*(wA[:,:,:]+wB[:,:,:])*(Phi_A[:,:,:]+Phi_B[:,:,:]-1.0)
+    F_fh=simposon_int_pbc(ar,Rx_grid)/Mv
+    F_tot=F_fh-np.log(bigQ)
+    return
+
+    
+def field_update(update_scheme,XN,fA,wA,wB,Phi_A,Phi_B,Rx_grid,Nx,ITR): # update the fields with the calculated density field, 0 for simple mixing, 1 for anderson mixing.
+    wA_tmp=np.zeros((Nx,Nx,Nx))
+    wB_tmp=np.zeros((Nx,Nx,Nx))
+    yita=np.zeros((Nx,Nx,Nx))
+    yita[:,:,:]=0.5*(wA[:,:,:]+wB[:,:,:])
+    field_err=np.zeros(2)
+    wA_tmp[:,:,:]=XN*(Phi_B[:,:,:]-(1.0-fA))+yita[:,:,:]
+    wB_tmp[:,:,:]=XN*(Phi_A[:,:,:]-fA)+yita[:,:,:]
+    if update_scheme==0 :
+        SimpleMixing_AB(wA_temp,wA,wB_temp,wB,lambda_t,field_err)
+        if ITR%10==0: print "field_err, iteration step",field_err,ITR 
+    elif update_scheme==1 :
+        AndersonMixing_AB()
+    else :
+        raise ValueError('Unkonwn update scheme for fields, only simple mxing (0) or Anderson mixing (1) supported now')
+
+    return field_err
+
+def SimpleMixing_AB(wA_temp,wA,wB_temp,wB,lambda_t,field_err):
+    field_err[0]=np.max(np.abs(wA_tmp[:,:,:]-wA[:,:,:]))
+    field_err[1]=np.max(np.abs(wB_tmp[:,:,:]-wB[:,:,:]))
+    wA[:,:,:]=wA[:,:,:]+lambda_t*(wA_tmp[:,:,:]-wA[:,:,:])
+    wB[:,:,:]=wB[:,:,:]+lambda_t*(wB_tmp[:,:,:]-wB[:,:,:])
+    return 
 
 
 
@@ -126,8 +180,14 @@ def propagator_to_density(q_f,q_b,fA,NA,NB): # compute the density field from pr
 
 
 
-  
 
 
 
+
+
+
+
+
+
+                        
 
